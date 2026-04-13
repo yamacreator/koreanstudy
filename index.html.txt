@@ -1,0 +1,479 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>韓国語学習アプリ：AI統合マスター</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700&family=Noto+Sans+KR:wght@400;500;700&display=swap');
+        body {
+            font-family: 'Noto Sans JP', 'Noto Sans KR', sans-serif;
+            background-color: #f8fafc;
+        }
+        .pronunciation-red {
+            color: #ef4444;
+            font-weight: bold;
+        }
+        .fade-in {
+            animation: fadeIn 0.3s ease-in-out;
+        }
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+    </style>
+</head>
+<body class="min-h-screen text-slate-800">
+
+<div id="app" class="max-w-md mx-auto min-h-screen flex flex-col p-4">
+    <div id="loading" class="hidden fixed inset-0 bg-white/80 flex items-center justify-center z-50">
+        <div class="text-center">
+            <div class="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto"></div>
+            <p class="mt-4 text-sm text-slate-500">AIが思考中...</p>
+        </div>
+    </div>
+    
+    <!-- 編集用モーダル -->
+    <div id="edit-modal" class="hidden fixed inset-0 bg-black/50 flex items-center justify-center z-[60] p-4">
+        <div class="bg-white w-full max-w-sm rounded-2xl p-6 space-y-4 shadow-xl">
+            <div class="flex justify-between items-center">
+                <h3 class="font-bold text-lg text-slate-800">内容を編集</h3>
+                <span id="save-status" class="text-xs text-emerald-500 font-bold opacity-0 transition-opacity">保存完了</span>
+            </div>
+            <div class="space-y-3">
+                <div>
+                    <label class="text-[10px] font-bold text-slate-400 uppercase">日本語</label>
+                    <input id="edit-ja" type="text" class="w-full px-3 py-2 bg-slate-50 border rounded-lg outline-none focus:ring-2 focus:ring-blue-500">
+                </div>
+                <div>
+                    <label class="text-[10px] font-bold text-slate-400 uppercase">韓国語</label>
+                    <input id="edit-ko" type="text" class="w-full px-3 py-2 bg-slate-50 border rounded-lg outline-none focus:ring-2 focus:ring-blue-500">
+                </div>
+                <div>
+                    <label class="text-[10px] font-bold text-slate-400 uppercase">読み方</label>
+                    <input id="edit-reading" type="text" class="w-full px-3 py-2 bg-slate-50 border rounded-lg outline-none focus:ring-2 focus:ring-blue-500">
+                </div>
+            </div>
+            <div class="flex flex-col gap-2 pt-2">
+                <button id="btn-save-edit" class="w-full py-3 bg-blue-600 text-white rounded-xl font-bold shadow-md active:scale-95 transition-transform">
+                    変更を保存する
+                </button>
+                <button id="btn-cancel-edit" class="w-full py-3 bg-slate-100 text-slate-600 rounded-xl font-medium">閉じる</button>
+                <button id="btn-delete-word" class="w-full py-2 mt-2 text-rose-400 text-xs font-medium hover:text-rose-600 transition-colors">この単語を削除する</button>
+            </div>
+        </div>
+    </div>
+
+    <main id="main-content" class="flex-grow flex flex-col"></main>
+</div>
+
+<script type="module">
+    const apiKey = ""; 
+    const VOCAB_KEY = 'korean_app_master_vocab_v6'; // キーを更新してクリーンな保存環境を作る
+    const DELETED_KEY = 'korean_app_deleted_ids_v6';
+
+    let state = {
+        view: 'home',
+        vocabulary: [],
+        deletedIds: [],
+        currentQuestion: null,
+        quizFeedback: null,
+        userAnswer: "",
+        recentQuestions: [], 
+        cooldownList: {},
+        editingId: null,
+        audioCache: {} 
+    };
+
+    const masterData = [
+        { id: "fixed-01", ja: '狼', ko: '늑대', reading: 'ヌ<span class="pronunciation-red">クテ</span>' },
+        { id: "fixed-02", ja: '騒ぎになる', ko: '소동이 나요', reading: 'ソドンイ ナヨ' },
+        { id: "fixed-03", ja: '野生', ko: '야생', reading: 'ヤセン' },
+        { id: "fixed-04", ja: '金利', ko: '금리', reading: 'ク<span class="pronunciation-red">ムニ</span>' },
+        { id: "fixed-05", ja: '凍結', ko: '동결', reading: 'トンギョル' },
+        { id: "fixed-06", ja: '絶滅する', ko: '멸종하다', reading: 'ミョルチョンハダ' },
+        { id: "fixed-07", ja: '脱出する', ko: '탈출하다', reading: 'タルチュルハダ' },
+        { id: "fixed-08", ja: '大騒ぎ', ko: '대소동', reading: 'テソドン' },
+        { id: "fixed-09", ja: '大騒ぎ', ko: '난리', reading: 'ナ<span class="pronunciation-red">ルリ</span>' },
+        { id: "fixed-10", ja: '売り切れ', ko: '품절', reading: 'プムジョル' },
+        { id: "fixed-11", ja: '売り切れ', ko: '매진', reading: 'メジン' },
+        { id: "fixed-12", ja: '金額', ko: '금액', reading: 'クメク' },
+        { id: "fixed-13", ja: '保有', ko: '보유', reading: 'ポユ' },
+        { id: "fixed-14", ja: '政治家', ko: '정치인', reading: 'チョンチイン' },
+        { id: "fixed-15", ja: '当選する', ko: '당선하다', reading: 'タンソンハダ' },
+        { id: "fixed-16", ja: '宝くじが当たる', ko: '복권에 당첨되다', reading: 'ポックォネ タンチョムドェダ' },
+        { id: "fixed-17", ja: '把握する', ko: '파악하다', reading: 'パアカダ' },
+        { id: "fixed-18", ja: '立ち寄る', ko: '들르다', reading: 'トゥルルダ' },
+        { id: "fixed-19", ja: '寄り道する', ko: '딴 데로 새다', reading: 'タン デロ セダ' },
+        { id: "fixed-20", ja: '繰り返しになりますが、', ko: '다시 말씀드리지만', reading: 'タシ マルスムドゥリジマン' },
+        { id: "fixed-21", ja: '活躍', ko: '활약', reading: 'ファリャク' },
+        { id: "fixed-22", ja: '稼ぐ', ko: '벌다', reading: 'ポルダ' },
+        { id: "fixed-23", ja: '稼ぎます。', ko: '벌어요', reading: 'ポロヨ' },
+        { id: "fixed-24", ja: 'まつ毛', ko: '속눈썹', reading: 'ソ<span class="pronunciation-red">ンヌンソプ</span>' },
+        { id: "fixed-25", ja: 'まゆげ', ko: '눈썹', reading: 'ヌ<span class="pronunciation-red">ンソプ</span>' },
+        { id: "fixed-26", ja: 'どうなりますか？', ko: '어떻게 돼요?', reading: 'オットケ ドェヨ?' },
+        { id: "fixed-27", ja: 'もらう', ko: '받다', reading: 'パ<span class="pronunciation-red">ッタ</span>' },
+        { id: "fixed-28", ja: 'もらいます。', ko: '받아요', reading: 'パダヨ' },
+        { id: "fixed-29", ja: '魅力があります。', ko: '매력이 있어요.', reading: 'メリョギ イッソヨ' },
+        { id: "fixed-30", ja: 'つまり、', ko: '그러니까', reading: 'クロニッカ' },
+        { id: "fixed-31", ja: '当時を振り返ると、', ko: '당시를 돌아보면', reading: 'タンシルル トラボミョン' },
+        { id: "fixed-32", ja: '就職活動をしています。', ko: '취업 활동을 하고 있어요.', reading: 'チュィオプ ファルトンウル ハゴ イッソヨ' },
+        { id: "fixed-33", ja: '総理大臣', ko: '총리', reading: 'チョ<span class="pronunciation-red">ンニ</span>' },
+        { id: "fixed-34", ja: '盗塁', ko: '도루', reading: 'トル' },
+        { id: "fixed-35", ja: '代打', ko: '대타', reading: 'テ<span class="pronunciation-red">タ</span>' },
+        { id: "fixed-36", ja: '送料無料', ko: '무료 배송', reading: 'ムリョ ペソン' },
+        { id: "fixed-37", ja: '投げる', ko: '던지다', reading: 'トンジダ' },
+        { id: "fixed-38", ja: '狭い', ko: '좁다', reading: 'チョ<span class="pronunciation-red">プタ</span>' },
+        { id: "fixed-39", ja: '広い', ko: '넓다', reading: 'ノル<span class="pronunciation-red">プタ</span>' },
+        { id: "fixed-40", ja: 'お金を払う', ko: '돈을 내다', reading: 'トヌル ネダ' },
+        { id: "fixed-41", ja: '節約する', ko: '절약하다', reading: 'チョリャカダ' },
+        { id: "fixed-42", ja: 'マスコミ', ko: '매스컴', reading: 'メスコム' },
+        { id: "fixed-43", ja: '積極的', ko: '적극적', reading: 'チョ<span class="pronunciation-red">ックッチョク</span>' },
+        { id: "fixed-44", ja: '消極的', ko: '소극적', reading: 'ソグクチョク' },
+        { 
+            id: "fixed-45",
+            ja: '大学生の時、ハングルの読み方くらいは授業で学びましたが、卒業してからは全く勉強していません。', 
+            ko: '대학생 때 한글 읽는 법 정도만 강의에서 배웠고, 졸업하고 나서는 전혀 공부 안 했어요.', 
+            reading: 'テハクセンッテ ハングル イルンヌン ボプ チョンドマン カンイエソ ペウォッコ, チョロパゴ ナソヌン チョニョ コンブ アン ヘッソヨ' 
+        }
+    ];
+
+    function loadData() {
+        const savedDeleted = localStorage.getItem(DELETED_KEY);
+        state.deletedIds = savedDeleted ? JSON.parse(savedDeleted) : [];
+
+        const savedVocab = localStorage.getItem(VOCAB_KEY);
+        
+        if (savedVocab) {
+            // 保存データがあるなら、それを「唯一の正解」とする
+            state.vocabulary = JSON.parse(savedVocab);
+        } else {
+            // 初回のみマスターデータを注入
+            state.vocabulary = masterData.map(item => ({
+                ...item,
+                updatedAt: 0,
+                image: `https://loremflickr.com/400/300/${encodeURIComponent(item.ja.substring(0, 10))}`
+            }));
+            saveData();
+        }
+    }
+
+    function saveData() {
+        localStorage.setItem(VOCAB_KEY, JSON.stringify(state.vocabulary));
+        localStorage.setItem(DELETED_KEY, JSON.stringify(state.deletedIds));
+    }
+
+    async function callAI(prompt, systemInstruction) {
+        document.getElementById('loading').classList.remove('hidden');
+        try {
+            const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    contents: [{ parts: [{ text: prompt }] }],
+                    systemInstruction: { parts: [{ text: systemInstruction }] },
+                    generationConfig: { responseMimeType: "application/json" }
+                })
+            });
+            const data = await response.json();
+            return JSON.parse(data.candidates?.[0]?.content?.parts?.[0]?.text || "{}");
+        } catch (error) {
+            return null;
+        } finally {
+            document.getElementById('loading').classList.add('hidden');
+        }
+    }
+
+    async function preloadAudio(text) {
+        if (!text || state.audioCache[text]) return;
+        try {
+            const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-tts:generateContent?key=${apiKey}`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    contents: [{ parts: [{ text: text }] }],
+                    generationConfig: {
+                        responseModalities: ["AUDIO"],
+                        speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: "Kore" } } }
+                    }
+                })
+            });
+            const data = await response.json();
+            const pcmData = data.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
+            if (pcmData) state.audioCache[text] = pcmData;
+        } catch (e) {}
+    }
+
+    async function playAudio(text) {
+        if (!text) return;
+        let pcmData = state.audioCache[text];
+        if (!pcmData) {
+            await preloadAudio(text);
+            pcmData = state.audioCache[text];
+        }
+        if (!pcmData) return;
+
+        try {
+            const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+            const arrayBuffer = Uint8Array.from(atob(pcmData), c => c.charCodeAt(0)).buffer;
+            const wavBuffer = await createWav(arrayBuffer, 24000);
+            const audioBuffer = await audioContext.decodeAudioData(wavBuffer);
+            const source = audioContext.createBufferSource();
+            source.buffer = audioBuffer;
+            source.connect(audioContext.destination);
+            source.start();
+        } catch (e) {}
+    }
+
+    async function createWav(pcmBuffer, sampleRate) {
+        const header = new ArrayBuffer(44);
+        const view = new DataView(header);
+        view.setUint32(0, 0x46464952, true); 
+        view.setUint32(4, 36 + pcmBuffer.byteLength, true);
+        view.setUint32(8, 0x45564157, true); 
+        view.setUint32(12, 0x20746d66, true); 
+        view.setUint16(20, 1, true); 
+        view.setUint16(22, 1, true); 
+        view.setUint32(24, sampleRate, true);
+        view.setUint32(28, sampleRate * 2, true);
+        view.setUint16(32, 2, true);
+        view.setUint16(34, 16, true);
+        view.setUint32(36, 0x61746164, true); 
+        view.setUint32(40, pcmBuffer.byteLength, true);
+        return new Blob([header, pcmBuffer], { type: 'audio/wav' }).arrayBuffer();
+    }
+
+    function startQuiz() {
+        if (state.vocabulary.length === 0) return;
+        const eligible = state.vocabulary.filter(v => {
+            return !state.recentQuestions.includes(v.id) && !(state.cooldownList[v.id] > 0);
+        });
+        const pool = eligible.length > 0 ? eligible : state.vocabulary;
+        state.currentQuestion = pool[Math.floor(Math.random() * pool.length)];
+        
+        preloadAudio(state.currentQuestion.ko);
+
+        state.view = 'quiz';
+        state.userAnswer = "";
+        state.quizFeedback = null;
+        render();
+    }
+
+    async function checkAnswer() {
+        const q = state.currentQuestion;
+        const ans = state.userAnswer.trim();
+        playAudio(q.ko);
+
+        const synonyms = state.vocabulary.filter(v => v.ja === q.ja).map(v => v.ko);
+        const isCorrect = synonyms.includes(ans);
+
+        if (isCorrect) {
+            state.quizFeedback = { isCorrect: true, message: "正解です！" };
+            state.recentQuestions.push(q.id);
+            if (state.recentQuestions.length > 10) state.recentQuestions.shift();
+            delete state.cooldownList[q.id];
+        } else {
+            state.quizFeedback = { isCorrect: false, message: "不正解です。" };
+            state.cooldownList[q.id] = 7;
+            const prompt = `User answered "${ans}" for "${q.ko}". Find spelling mistakes.`;
+            callAI(prompt, "Korean feedback.").then(res => {
+                if (res && res.feedback && state.view === 'result') {
+                    state.quizFeedback.message = res.feedback;
+                    render();
+                }
+            });
+        }
+        Object.keys(state.cooldownList).forEach(id => { if(id !== q.id) state.cooldownList[id]--; });
+        state.view = 'result';
+        render();
+    }
+
+    function openEditModal(id) {
+        const word = state.vocabulary.find(v => v.id === id);
+        if (!word) return;
+        state.editingId = id;
+        document.getElementById('edit-ja').value = word.ja;
+        document.getElementById('edit-ko').value = word.ko;
+        document.getElementById('edit-reading').value = word.reading;
+        document.getElementById('edit-modal').classList.remove('hidden');
+        document.getElementById('save-status').style.opacity = "0";
+    }
+
+    function closeEditModal() {
+        state.editingId = null;
+        document.getElementById('edit-modal').classList.add('hidden');
+    }
+
+    function saveEdit() {
+        const ja = document.getElementById('edit-ja').value;
+        const ko = document.getElementById('edit-ko').value;
+        const reading = document.getElementById('edit-reading').value;
+        const idx = state.vocabulary.findIndex(v => v.id === state.editingId);
+        
+        if (idx !== -1) {
+            state.vocabulary[idx].ja = ja;
+            state.vocabulary[idx].ko = ko;
+            state.vocabulary[idx].reading = reading;
+            state.vocabulary[idx].updatedAt = Date.now();
+            
+            saveData(); // localStorageへ書き込み
+            
+            document.getElementById('save-status').style.opacity = "1";
+            render();
+            setTimeout(closeEditModal, 600);
+        }
+    }
+
+    function deleteWord() {
+        if (!confirm('この単語を完全に削除しますか？')) return;
+        state.deletedIds.push(state.editingId);
+        state.vocabulary = state.vocabulary.filter(v => v.id !== state.editingId);
+        saveData();
+        if (state.currentQuestion && state.currentQuestion.id === state.editingId) state.view = 'home';
+        render();
+        closeEditModal();
+    }
+
+    async function handleAddWord(jaInput, koInput) {
+        const prompt = `Input: ja="${jaInput}", ko="${koInput}". Rules: 1. Pronunciation in Katakana. 2. Suggest 1 more daily word. JSON: { "main": { "ja": "...", "ko": "...", "reading": "..." }, "suggestion": { "ja": "...", "ko": "...", "reading": "..." } }`;
+        const result = await callAI(prompt, "Korean linguist.");
+        if (result && result.main) {
+            const now = Date.now();
+            const newItems = [result.main, result.suggestion].filter(i => i).map(w => ({
+                ...w,
+                id: crypto.randomUUID(),
+                updatedAt: now,
+                image: `https://loremflickr.com/400/300/${encodeURIComponent(w.ja.substring(0,10))}`
+            }));
+            state.vocabulary = [...state.vocabulary, ...newItems];
+            saveData();
+            render();
+        }
+    }
+
+    function HomeView() {
+        const sortedList = [...state.vocabulary].sort((a, b) => {
+            const timeA = a.updatedAt || 0;
+            const timeB = b.updatedAt || 0;
+            if (timeB !== timeA) return timeB - timeA;
+            return b.id.localeCompare(a.id);
+        });
+
+        return `
+            <div class="fade-in space-y-6">
+                <header class="text-center py-6">
+                    <h1 class="text-2xl font-bold text-slate-900 tracking-tight">韓国語学習 AI</h1>
+                    <p class="text-[11px] text-slate-400 mt-1">編集した単語は自動的に一番上に保存されます</p>
+                </header>
+
+                <div class="bg-white rounded-2xl shadow-sm border p-5 space-y-4">
+                    <div class="grid grid-cols-2 gap-3">
+                        <input id="add-ja" type="text" placeholder="日本語" class="w-full px-3 py-2 bg-slate-50 border rounded-xl text-sm focus:ring-2 focus:ring-blue-500 outline-none">
+                        <input id="add-ko" type="text" placeholder="韓国語" class="w-full px-3 py-2 bg-slate-50 border rounded-xl text-sm focus:ring-2 focus:ring-blue-500 outline-none">
+                    </div>
+                    <button id="btn-add" class="w-full py-3 bg-blue-600 text-white rounded-xl font-bold shadow-sm active:scale-95 transition-transform">追加</button>
+                </div>
+
+                <div class="space-y-3 pb-8">
+                    <div class="flex justify-between items-end px-1">
+                        <h2 class="font-bold text-slate-800">リスト (${state.vocabulary.length})</h2>
+                        <button id="btn-start-quiz" class="px-6 py-2.5 bg-emerald-500 text-white rounded-full text-sm font-black shadow-lg">クイズ開始</button>
+                    </div>
+                    
+                    <div class="grid gap-2.5 overflow-y-auto max-h-[55vh] pr-1">
+                        ${sortedList.map(v => `
+                            <div onclick="window.app.editWord('${v.id}')" class="flex items-center justify-between bg-white p-4 rounded-2xl border border-slate-100 shadow-sm cursor-pointer hover:border-blue-200 transition-all group">
+                                <div class="flex-grow">
+                                    <p class="text-[11px] text-slate-400">${v.ja}</p>
+                                    <p class="font-bold text-slate-800 text-lg">${v.ko}</p>
+                                </div>
+                                <div class="bg-blue-50 text-blue-500 p-2 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity">
+                                    <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg>
+                                </div>
+                            </div>
+                        `).join('')}
+                    </div>
+                </div>
+            </div>
+        `;
+    }
+
+    function QuizView() {
+        const q = state.currentQuestion;
+        return `
+            <div class="fade-in flex flex-col items-center justify-center flex-grow space-y-8 py-6">
+                <div class="text-center px-4 w-full">
+                    <button onclick="window.app.editWord('${q.id}')" class="mb-4 text-[10px] font-bold tracking-widest uppercase text-blue-500 bg-blue-50 px-4 py-1.5 rounded-full border border-blue-100">編集</button>
+                    <h2 class="text-3xl font-black text-slate-900 leading-tight">${q.ja}</h2>
+                </div>
+                <div class="w-72 h-72 bg-slate-100 rounded-[2.5rem] overflow-hidden shadow-2xl border-8 border-white">
+                    <img src="${q.image}" class="w-full h-full object-cover">
+                </div>
+                <textarea id="quiz-input" placeholder="韓国語で入力..." class="w-full max-w-sm px-6 py-5 text-center text-xl font-bold bg-white border-2 rounded-[2rem] outline-none focus:border-blue-500 min-h-[100px]"></textarea>
+            </div>
+        `;
+    }
+
+    function ResultView() {
+        const q = state.currentQuestion;
+        const f = state.quizFeedback;
+        return `
+            <div class="fade-in flex flex-col items-center justify-center flex-grow space-y-6 py-6 px-4">
+                <div class="text-center space-y-2">
+                    <div class="text-6xl animate-bounce">${f.isCorrect ? '✨' : '🧐'}</div>
+                    <h2 class="text-2xl font-black ${f.isCorrect ? 'text-emerald-500' : 'text-rose-500'}">${f.message}</h2>
+                </div>
+                <div class="bg-white w-full p-8 rounded-[2.5rem] shadow-xl border border-slate-50 text-center space-y-6 relative">
+                    <button onclick="window.app.editWord('${q.id}')" class="absolute top-6 right-6 p-2 text-slate-300 hover:text-blue-500"><svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg></button>
+                    <div><p class="text-lg font-medium text-slate-600">${q.ja}</p></div>
+                    <hr class="border-slate-50">
+                    <div><p class="text-4xl font-black text-slate-900">${q.ko}</p></div>
+                    <div class="bg-slate-50 p-4 rounded-2xl"><p class="text-xl text-slate-700">${q.reading}</p></div>
+                </div>
+                <div class="grid grid-cols-2 gap-4 w-full pt-4">
+                    <button id="btn-replay" class="py-4 bg-slate-100 rounded-2xl font-bold">再生</button>
+                    <button id="btn-next" class="py-4 bg-blue-600 text-white rounded-2xl font-bold shadow-lg">次へ</button>
+                    <button id="btn-home" class="py-3 text-slate-400 font-bold text-sm col-span-2">ホーム</button>
+                </div>
+            </div>
+        `;
+    }
+
+    function render() {
+        const main = document.getElementById('main-content');
+        if (state.view === 'home') main.innerHTML = HomeView();
+        else if (state.view === 'quiz') main.innerHTML = QuizView();
+        else if (state.view === 'result') main.innerHTML = ResultView();
+
+        if (state.view === 'home') {
+            document.getElementById('btn-add').onclick = () => {
+                const ja = document.getElementById('add-ja').value;
+                const ko = document.getElementById('add-ko').value;
+                if (ja) handleAddWord(ja, ko);
+            };
+            document.getElementById('btn-start-quiz').onclick = startQuiz;
+        } else if (state.view === 'quiz') {
+            const input = document.getElementById('quiz-input');
+            if (input) {
+                setTimeout(() => input.focus(), 50);
+                input.onkeydown = (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); state.userAnswer = input.value; checkAnswer(); } };
+            }
+        } else if (state.view === 'result') {
+            document.getElementById('btn-next').onclick = startQuiz;
+            document.getElementById('btn-replay').onclick = () => playAudio(state.currentQuestion.ko);
+            document.getElementById('btn-home').onclick = () => { state.view = 'home'; render(); };
+        }
+    }
+
+    document.getElementById('btn-cancel-edit').onclick = closeEditModal;
+    document.getElementById('btn-save-edit').onclick = saveEdit;
+    document.getElementById('btn-delete-word').onclick = deleteWord;
+
+    window.app = { editWord: openEditModal };
+
+    loadData();
+    render();
+</script>
+</body>
+</html>
