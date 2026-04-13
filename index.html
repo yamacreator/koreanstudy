@@ -448,10 +448,11 @@
 
         if (state.view === 'home') {
             document.getElementById('btn-add').onclick = () => {
-                const ja = document.getElementById('add-ja').value;
-                const ko = document.getElementById('add-ko').value;
-                if (ja) handleAddWord(ja, ko);
-            };
+    console.log("クリックされた"); // ←追加
+    const ja = document.getElementById('add-ja').value;
+    const ko = document.getElementById('add-ko').value;
+    if (ja) handleAddWord(ja, ko);
+};
             document.getElementById('btn-start-quiz').onclick = startQuiz;
         } else if (state.view === 'quiz') {
             const input = document.getElementById('quiz-input');
